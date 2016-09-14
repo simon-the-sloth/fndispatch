@@ -46,10 +46,10 @@ class VersionManager(object):
     It collects all the functions with the corresponding decorator, order it and choose the right one when you try to
     load it.
     """
-    def __init__(self, version=None, min_version=None, max_version=None):
+    def __init__(self, version, min_version=None, max_version=None):
         self._versions = {}
         self._keys = []
-        self._next_version = version if version is not None else 1
+        self._next_version = version
         self._min_version = min_version
         self._max_version = max_version
         self._function_name = None
