@@ -1,7 +1,7 @@
 # fnversion
 Small tool to support multiple versions of the same function or method in Python.
 
-
+```python
     class SampleVersionManager(VersionManager):
         def get_version_number(instance=None, owner=None, args=None, kwargs=None):
             return args[0]
@@ -30,3 +30,4 @@ Small tool to support multiple versions of the same function or method in Python
     assert versioned_method(5, 12) == 36
     assert versioned_method(6, 12) == 36
     assert versioned_method(7, 12) == 36
+```
