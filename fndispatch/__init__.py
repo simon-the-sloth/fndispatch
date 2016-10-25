@@ -11,19 +11,19 @@ Sample usage:
     def versioned_method(version, num):
         return num * 1
 
-    @versioned_method.version(2)
+    @versioned_method.register_version(2)
     def versioned_method(version, num):
         return num * 2
 
-    @versioned_method.version(5)
+    @versioned_method.register_version(5)
     def versioned_method(version, num):
         return num * 3
 
 
     try:
         versioned_method(0, 12)
-    except VersionError as exc:
-        assert exc.args[0] == 'No suitable version found.'
+    except VersionNotFound as exc:
+        assert exc.args[0] == 'No suitable version found'
     assert versioned_method(1, 12) == 12
     assert versioned_method(2, 12) == 24
     assert versioned_method(3, 12) == 24
@@ -38,7 +38,7 @@ __version__ = "1.0"
 
 import inspect
 
-from fnversion.exceptions import VersionError, VersionTooLow, VersionTooHigh, VersionNotFound
+from fndispatch.exceptions import VersionTooLow, VersionTooHigh, VersionNotFound
 
 
 class VersionManager(object):
@@ -46,37 +46,41 @@ class VersionManager(object):
     It collects all the functions with the corresponding decorator, order it and choose the right one when you try to
     load it.
     """
-    def __init__(self, version, min_version=None, max_version=None):
+    def __init__(self, initial_version, min_version=None, max_version=None, fallback=True):
         self._versions = {}
         self._keys = []
-        self._next_version = version
+        self._next_version = initial_version
         self._min_version = min_version
         self._max_version = max_version
+        self._fallback = fallback
         self._function_name = None
 
     def __call__(self, *args, **kwargs):
         if self._next_version is not None:
-            if kwargs or len(args) != 1:
-                raise TypeError('Version saver expects exactly 1 argument ({0} given)'.format(len(args) + len(kwargs)))
-
-            func = args[0]
-            if not inspect.isfunction(func) and not inspect.ismethod(func):
-                raise TypeError('Version saver expects function or method')
-
-            self._versions[self._next_version] = func
-            self._next_version = None
-            self._keys = list(self._versions.keys())
-            self._keys.sort(reverse=True)
-
-            # Save the name of the decorated function for later use
-            if self._function_name is None:
-                self._function_name = func.__name__
-            return self
+            return self._set_new_version(*args, **kwargs)
 
         version_number = self.get_version_number(args=args, kwargs=kwargs)
         version_func = self._get_version(version_number)
 
         return version_func(*args, **kwargs)
+
+    def _set_new_version(self, *args, **kwargs):
+        if kwargs or len(args) != 1:
+            raise TypeError('Version saver expects exactly 1 argument ({0} given)'.format(len(args) + len(kwargs)))
+
+        func = args[0]
+        if not inspect.isfunction(func) and not inspect.ismethod(func):
+            raise TypeError('Version saver expects function or method')
+
+        self._versions[self._next_version] = func
+        self._next_version = None
+        self._keys = list(self._versions.keys())
+        self._keys.sort(reverse=True)
+
+        # Save the name of the decorated function for later use
+        if self._function_name is None:
+            self._function_name = func.__name__
+        return self
 
     def __get__(self, instance, owner):
         # If _next_version is set, we are setting up a new version and not getting an old one.
@@ -98,35 +102,41 @@ class VersionManager(object):
         version_wrapper.__name__ = self._function_name
         return version_wrapper
 
-    def version(self, version):
+    def register_version(self, version):
         if self._next_version is not None:
-            raise VersionError('Next version number already set. Cannot set it twice.')
+            raise TypeError('Next version number already set. Cannot set it twice.')
 
         if self._next_version in self._versions:
-            raise VersionError('This version is already registered.')
+            raise ValueError('This version is already registered.')
 
         self._next_version = version
         return self
 
     def _get_version(self, version_number):
+        if not self._fallback:
+            try:
+                return self._versions[version_number]
+            except KeyError:
+                return self.no_version_found(version_number)
+
         if self._min_version is not None and version_number < self._min_version:
-            return self.version_too_low
+            return self.too_low_version(version_number)
 
         if self._max_version is not None and version_number > self._max_version:
-            return self.version_too_high
+            return self.too_high_version(version_number)
 
         for i in range(len(self._keys)):
             if self._keys[i] <= version_number:
                 break
         else:
-            raise VersionError('No suitable version found.')
+            return self.no_version_found(version_number)
 
         return self._versions[self._keys[i]]
 
     @staticmethod
     def get_version_number(instance=None, owner=None, args=None, kwargs=None):
         """
-        Get the version number here. Can be overridden in the subclass to support different version number sources.
+        Get the version number here. Have to be overridden in the subclass to support different version number sources.
         Usage of the function:
           Versioned functions are methods:
             Instance is the instance of class where the method is bounded to. Owner is the class of the instance.
@@ -145,22 +155,13 @@ class VersionManager(object):
         raise NotImplementedError
 
     @staticmethod
-    def version_not_found(*args, **kwargs):
-        """
-        Wrapper for not found version. Can be overridden by child class.
-        """
-        raise VersionError('Version not found for the corresponding version number.')
+    def too_low_version(version_number):
+        raise VersionTooLow('Version number is too low')
 
     @staticmethod
-    def version_too_low(*args, **kwargs):
-        """
-        Wrapper for too low version number. Can be overridden by child class.
-        """
-        raise VersionError('Version number is too low. Upgrade required.')
+    def too_high_version(version_number):
+        raise VersionTooHigh('Version number is too high')
 
     @staticmethod
-    def version_too_high(*args, **kwargs):
-        """
-        Wrapper for too high version number. Can be overridden by child class.
-        """
-        raise VersionError('Version number is too high.')
+    def no_version_found(version_number):
+        raise VersionNotFound('No suitable version found')
